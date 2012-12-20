@@ -26,6 +26,10 @@
         }
     },
     {
+        "caption": "Java: Organize Imports",
+        "command": "organize_java_imports"
+    },
+    {
         "caption": "Java: Insert Package Declaration",
         "command": "insert_java_package"
     }

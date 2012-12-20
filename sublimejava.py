@@ -24,6 +24,7 @@ import sublime
 import sublime_plugin
 import os
 import re
+import bisect
 
 from sublimecompletioncommon import completioncommon
 reload(completioncommon)
@@ -154,6 +155,7 @@ in the current package, or is in the default package."
 
 RE_IMPORT = "import( static)? ([\w\.]+)\.([\w]+|\*);"
 RE_PACKAGE = "package ([\w]+.)*\w+;"
+RE_IMPORT_SECTION = "(^import[^;\n]+;[^\n]*\n)+"
 
 
 class ImportJavaClassCommand(sublime_plugin.TextCommand):
@@ -182,12 +184,35 @@ class ImportJavaClassCommand(sublime_plugin.TextCommand):
         newlines_prepend = 0
         newlines_append = 1
 
+        import_classname = full_classname.replace("$", ".")
+        import_statement = "import %s;" % (import_classname)
         all_imports_region = self.view.find_all(RE_IMPORT)
 
         if len(all_imports_region) > 0:
-            insert_point = all_imports_region[-1].b
-            newlines_prepend = 1
-            newlines_append = 0
+            all_imports = sorted([(region, self.view.substr(region)) for region in all_imports_region], key=lambda a: a[1])
+            only_imports = [a[1] for a in all_imports]
+
+            # The following logic is used to find the right spot to insert the import statement at if there are multiple
+            # separate import groups. See discussion in #62
+            pos = bisect.bisect_left(only_imports, import_statement)
+
+            def score_string(a, b):
+                score = 0
+                for i in range(min(len(a), len(b))):
+                    score += a[i] == b[i]
+                return score
+
+            if pos == len(all_imports) or (pos > 0 and \
+                    score_string(import_statement, all_imports[pos-1][1]) > score_string(import_statement, all_imports[pos][1])):
+                # Insert after
+                insert_point = all_imports[pos-1][0].b
+                newlines_prepend = 1
+                newlines_append = 0
+            else:
+                # Insert before
+                insert_point = all_imports[pos][0].a
+                newlines_prepend = 0
+                newlines_append = 1
         else:
             package_declaration_region = self.view.find(RE_PACKAGE, 0)
 
@@ -196,12 +221,27 @@ class ImportJavaClassCommand(sublime_plugin.TextCommand):
                 newlines_prepend = 2
                 newlines_append = 0
 
-        import_classname = full_classname.replace("$", ".")
-        import_statement = "%simport %s;%s" % ("\n" * newlines_prepend,
-                                               import_classname,
+        import_statement = "%s%s%s" % ("\n" * newlines_prepend,
+                                               import_statement,
                                                "\n" * newlines_append)
 
         self.view.insert(edit, insert_point, import_statement)
+
+        if comp.get_setting("sublimejava_organize_imports", True):
+            self.view.run_command("organize_java_imports")
+
+
+class OrganizeJavaImportsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        sections = self.view.find_all(RE_IMPORT_SECTION, 0)
+        section_imports = [self.view.substr(section) for section in sections]
+        for i in range(len(sections)):
+            # TODO pass func to organize as java, 3rd party, project
+            imports = section_imports[i][:-1].split("\n")
+            imports.sort()
+            imports = "\n".join(imports) + "\n"
+
+            self.view.replace(edit, sections[i], imports)
 
 
 class InsertJavaPackageCommand(sublime_plugin.TextCommand):
