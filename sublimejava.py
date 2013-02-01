@@ -25,12 +25,21 @@ import sublime_plugin
 import os
 import re
 import bisect
+import imp
 
-from sublimecompletioncommon import completioncommon
-reload(completioncommon)
+def reload(mod):
+    n = mod.__file__
+    if n[-1] == 'c':
+        n = n[:-1]
+    globals()[mod.__name__] = imp.load_source(mod.__name__, n)
+completioncommon = imp.load_source("completioncommon", os.path.join(os.path.dirname(os.path.abspath(__file__)), "sublimecompletioncommon/completioncommon.py"))
+completioncommon.reload(completioncommon)
 
-import classopener
-reload(classopener)
+try:
+    import SublimeJava.classopener as classopener
+except:
+    import classopener
+imp.reload(classopener)
 
 
 class SublimeJavaDotComplete(completioncommon.CompletionCommonDotComplete):
@@ -53,7 +62,7 @@ class SublimeJavaCompletion(completioncommon.CompletionCommon):
 
     def show_error(self, msg):
         if self.get_setting("sublimejava_no_visual_errors", False):
-            print msg
+            print(msg)
         else:
             sublime.error_message(msg + "\n\nDisable visual error message dialogues with setting:\nsublimejava_no_visual_errors: true")
 
@@ -158,28 +167,8 @@ RE_PACKAGE = "package ([\w]+.)*\w+;"
 RE_IMPORT_SECTION = "(^import[^;\n]+;[^\n]*\n)+"
 
 
-class ImportJavaClassCommand(sublime_plugin.TextCommand):
-
-    def run(self, edit):
-        view = self.view
-        classname = view.substr(view.word(view.sel()[0].begin()))
-
-        if comp.get_class_under_cursor():
-            comp.show_error(MSG_ALREADY_IMPORTED % classname)
-            return
-
-        imports = comp.get_possible_imports(classname)
-
-        def do_import(index):
-            if index != -1:
-                self._insert_import(imports[index], edit)
-
-        if len(imports) > 0:
-            view.window().show_quick_panel(imports, do_import)
-        else:
-            comp.show_error(MSG_NO_CLASSES_FOUND % classname)
-
-    def _insert_import(self, full_classname, edit):
+class ExecuteImportJavaCommand(sublime_plugin.TextCommand):
+    def run(self, edit, full_classname):
         insert_point = 0
         newlines_prepend = 0
         newlines_append = 1
@@ -229,6 +218,27 @@ class ImportJavaClassCommand(sublime_plugin.TextCommand):
 
         if comp.get_setting("sublimejava_organize_imports", True):
             self.view.run_command("organize_java_imports")
+
+
+class ImportJavaClassCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        view = self.view
+        classname = view.substr(view.word(view.sel()[0].begin()))
+
+        if comp.get_class_under_cursor():
+            comp.show_error(MSG_ALREADY_IMPORTED % classname)
+            return
+
+        imports = comp.get_possible_imports(classname)
+
+        def do_import(index):
+            if index != -1:
+                self.view.run_command("execute_import_java", {"full_classname": imports[index]})
+
+        if len(imports) > 0:
+            view.window().show_quick_panel(imports, do_import)
+        else:
+            comp.show_error(MSG_NO_CLASSES_FOUND % classname)
 
 
 class OrganizeJavaImportsCommand(sublime_plugin.TextCommand):
